@@ -4,7 +4,7 @@ function Home() {
     return (
         <div className="page home-page" data-testid="home-page">
             <header className="header">
-                <h1 data-testid="home-title">Ephemeral QA Environment</h1>
+                <h1 data-testid="home-title">Ephemeral QA Environment - BUG</h1>
             </header>
 
             <main className="main-content">
