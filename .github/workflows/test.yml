@@ -1,6 +1,11 @@
 # Target execution of automated tests against an existing environment
 name: Run Tests
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -42,10 +47,16 @@ jobs:
       - name: Execute Behave Scenarios
         run: |
           cd tests
-          behave -f allure_behave.formatter:AllureFormatter -o allure-results --no-capture
+          behave -f allure_behave.formatter:AllureFormatter -o allure-results --junit --junit-directory junit-results --no-capture
         env:
           BASE_URL: ${{ inputs.target_url }}
           HEADLESS: true
+
+      - name: Publish Test Summary
+        uses: test-summary/action@v2
+        with:
+          paths: "tests/junit-results/*.xml"
+        if: always()
 
       - name: Upload Allure results
         uses: actions/upload-artifact@v4
