@@ -42,9 +42,9 @@ Feature: Login Functionality
 
     Examples:
       | email          | password           | test_id |
-      |                | EphemeralTest@2026 | QAT-6   |
-      | test@legna.dev |                    | QAT-7   |
-      |                |                    | QAT-8   |
+      |                | EphemeralTest@2026 | 6       |
+      | test@legna.dev |                    | 7       |
+      |                |                    | 8       |
 
   @regression @QAT-9 @navigation
   Scenario: Back to home link works
