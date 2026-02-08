@@ -195,15 +195,17 @@ jobs:
           name: allure-results
           path: allure-results
 
-      - name: Allure History
+      - name: Load Allure history
         uses: actions/checkout@v4
+        if: always()
         continue-on-error: true
         with:
           ref: gh-pages
           path: gh-pages
 
-      - name: Allure Report
+      - name: Allure Report Action
         uses: simple-elf/allure-report-action@master
+        if: always()
         with:
           allure_results: allure-results
           gh_pages: gh-pages
@@ -213,9 +215,10 @@ jobs:
 
       - name: Deploy to Gh-Pages
         uses: peaceiris/actions-gh-pages@v3
+        if: always()
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: allure-report
+          publish_dir: allure-history
           publish_branch: gh-pages
 
       - name: Output Summary
