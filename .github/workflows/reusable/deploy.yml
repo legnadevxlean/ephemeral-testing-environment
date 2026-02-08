@@ -1,0 +1,93 @@
+name: Reusable Deploy
+
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      container_image:
+        required: true
+        type: string
+      terraform_version:
+        required: true
+        type: string
+    secrets:
+      ARM_CLIENT_ID:
+        required: true
+      ARM_CLIENT_SECRET:
+        required: true
+      ARM_SUBSCRIPTION_ID:
+        required: true
+      ARM_TENANT_ID:
+        required: true
+      ACR_LOGIN_SERVER:
+        required: true
+      ACR_USERNAME:
+        required: true
+      ACR_PASSWORD:
+        required: true
+    outputs:
+      app_url:
+        description: "The URL of the deployed application"
+        value: ${{ jobs.deploy.outputs.app_url }}
+
+jobs:
+  deploy:
+    name: Execute Deploy
+    runs-on: ubuntu-latest
+    outputs:
+      app_url: ${{ steps.terraform.outputs.app_url }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Provision Infrastructure
+        id: terraform
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="run_id=${{ inputs.run_id }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="container_image=${{ inputs.container_image }}" \
+            -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            -var="acr_username=${{ secrets.ACR_USERNAME }}" \
+            -var="acr_password=${{ secrets.ACR_PASSWORD }}"
+          echo "app_url=$(terraform output -raw app_url)" >> $GITHUB_OUTPUT
+
+      - name: Persist Terraform State
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfstate-${{ inputs.run_id }}
+          path: terraform/terraform.tfstate
+          retention-days: 1
+
+      - name: Verify Service Availability
+        run: |
+          echo "Verifying application availability at ${{ steps.terraform.outputs.app_url }}..."
+          for i in {1..30}; do
+            if curl -s -o /dev/null -w "%{http_code}" "${{ steps.terraform.outputs.app_url }}" | grep -q "200"; then
+              echo "Application is responsive."
+              exit 0
+            fi
+            echo "Waiting for service... ($i/30)"
+            sleep 10
+          done
+          echo "Error: Application timed out."
+          exit 1
