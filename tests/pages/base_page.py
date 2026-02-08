@@ -17,7 +17,7 @@ class BasePage:
     def __init__(self, driver: WebDriver, base_url: str):
         self.driver = driver
         self.base_url = base_url
-        self.timeout = 10
+        self.timeout = 20
     
     def navigate(self, path: str = None):
         """Navigate to the page's route or a specific path."""

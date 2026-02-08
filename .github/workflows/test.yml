@@ -105,8 +105,15 @@ jobs:
           publish_branch: gh-pages
 
       - name: Output Report URL
+        if: always()
         run: |
-          echo "## Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          REPORT_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          echo "### 🚀 Manual Test Execution Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Target URL:** ${{ inputs.target_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Allure Report:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target URL** | [${{ inputs.target_url }}](${{ inputs.target_url }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Allure Report** | [📊 View Detailed Report]($REPORT_URL) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered By** | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 *Note: The Allure Report covers all recent executions. Check the history for this specific run.*" >> $GITHUB_STEP_SUMMARY
