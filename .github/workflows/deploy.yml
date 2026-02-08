@@ -46,7 +46,7 @@ jobs:
   deploy:
     name: Provision
     needs: build
-    uses: ./.github/workflows/reusable/deploy.yml
+    uses: ./.github/workflows/reusable-deploy.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
       environment: "qa-manual"
@@ -68,7 +68,7 @@ jobs:
     name: Destroy
     needs: [deploy, wait]
     if: always() && inputs.auto_destroy == true && needs.deploy.result == 'success'
-    uses: ./.github/workflows/reusable/cleanup.yml
+    uses: ./.github/workflows/reusable-cleanup.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
       environment: "qa-manual"

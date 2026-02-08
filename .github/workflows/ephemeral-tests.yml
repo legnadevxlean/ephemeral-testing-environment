@@ -48,7 +48,7 @@ jobs:
   deploy:
     name: Provision
     needs: build
-    uses: ./.github/workflows/reusable/deploy.yml
+    uses: ./.github/workflows/reusable-deploy.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
       environment: "qa"
@@ -59,18 +59,19 @@ jobs:
   test:
     name: Regression
     needs: deploy
-    uses: ./.github/workflows/reusable/test.yml
+    uses: ./.github/workflows/reusable-test.yml
     with:
       target_url: ${{ needs.deploy.outputs.app_url }}
       python_version: "3.11"
       execution_type: "CI/CD Pipeline"
       image_tag: ${{ inputs.custom_id || github.run_id }}
+    secrets: inherit
 
   cleanup:
     name: Destroy
     needs: [deploy, test]
     if: always() && needs.deploy.result == 'success'
-    uses: ./.github/workflows/reusable/cleanup.yml
+    uses: ./.github/workflows/reusable-cleanup.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
       environment: "qa"

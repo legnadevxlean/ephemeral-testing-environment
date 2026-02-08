@@ -19,7 +19,7 @@ env:
 jobs:
   test:
     name: Run Tests
-    uses: ./.github/workflows/reusable/test.yml
+    uses: ./.github/workflows/reusable-test.yml
     with:
       target_url: ${{ inputs.target_url }}
       python_version: "3.11"
