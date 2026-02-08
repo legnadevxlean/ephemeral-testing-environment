@@ -1,5 +1,5 @@
 # Manual environment deployment for testing purposes
-name: Deploy Environment
+name: MANUAL - Deploy Environment
 
 on:
   workflow_dispatch:
