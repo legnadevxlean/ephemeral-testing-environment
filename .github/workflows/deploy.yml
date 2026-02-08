@@ -83,6 +83,7 @@ jobs:
           terraform apply -auto-approve \
             -var="run_id=${{ github.run_id }}" \
             -var="environment=${{ inputs.environment }}" \
+            -var="resource_group_name=rg-ephemeral-${{ inputs.environment }}" \
             -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.run_id }}" \
             -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
@@ -179,6 +180,7 @@ jobs:
           terraform destroy -auto-approve \
             -var="run_id=${{ github.run_id }}" \
             -var="environment=${{ inputs.environment }}" \
+            -var="resource_group_name=rg-ephemeral-${{ inputs.environment }}" \
             -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.run_id }}" \
             -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
