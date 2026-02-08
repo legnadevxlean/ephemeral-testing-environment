@@ -1,24 +1,26 @@
-# Manual environment deployment for testing purposes
-name: MANUAL - Deploy Environment
+# Automation pipeline for continuous integration and QA environments
+name: Run Ephemeral Tests
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 on:
+  push:
+    branches: [main, qa]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       custom_id:
         description: "Custom Identifier (optional, defaults to Run ID)"
         required: false
         type: string
-      keep_alive:
-        description: "How many minutes to keep the environment alive before destroying?"
-        default: "30"
-        required: true
-      auto_destroy:
-        description: "Automatically destroy resources after timeout?"
-        type: boolean
-        default: true
 
 env:
   TERRAFORM_VERSION: "1.14.4"
+  PYTHON_VERSION: "3.11"
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
@@ -55,29 +57,30 @@ jobs:
     uses: ./.github/workflows/reusable-deploy.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
-      environment: "qa-manual"
+      environment: "qa"
       container_image: ${{ needs.build.outputs.container_image }}
       terraform_version: "1.14.4"
     secrets: inherit
 
-  wait:
-    name: Wait Timer
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Keep Alive Timer
-        run: |
-          echo "Environment will be kept alive for ${{ inputs.keep_alive }} minutes."
-          sleep $(( ${{ inputs.keep_alive }} * 60 ))
+  test:
+    name: Regression
+    needs: [build, deploy]
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      target_url: ${{ needs.deploy.outputs.app_url }}
+      python_version: "3.11"
+      execution_type: "CI/CD Pipeline"
+      image_tag: ${{ inputs.custom_id || github.run_id }}
+    secrets: inherit
 
   cleanup:
     name: Destroy
-    needs: [build, deploy, wait]
-    if: always() && inputs.auto_destroy == true && needs.deploy.result == 'success'
+    needs: [build, deploy, test]
+    if: always() && needs.deploy.result == 'success'
     uses: ./.github/workflows/reusable-cleanup.yml
     with:
       run_id: ${{ inputs.custom_id || github.run_id }}
-      environment: "qa-manual"
+      environment: "qa"
       container_image: ${{ needs.build.outputs.container_image }}
       terraform_version: "1.14.4"
     secrets: inherit
