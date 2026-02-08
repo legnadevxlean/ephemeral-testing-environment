@@ -1,4 +1,4 @@
-# Automation pipeline for continuous integration and QA environments
+# Full monolithic pipeline for ephemeral QA environments
 name: "01 - Run Ephemeral Tests"
 
 permissions:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       custom_id:
-        description: "Custom Identifier (optional, defaults to Run ID)"
+        description: "Custom Identifier (optional)"
         required: false
         type: string
 
@@ -24,72 +24,173 @@ env:
 
 jobs:
   build:
-    name: Build Docker Image
+    name: Build & Push Image
     runs-on: ubuntu-latest
-    outputs:
-      container_image: ${{ steps.set-image.outputs.image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Docker Login
+      - name: Login to ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_LOGIN_SERVER }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - id: set-image
-        name: Generate Image Name
-        shell: bash
-        run: |
-          # Usamos un fallback robusto para el ID
-          RUN_ID="${{ github.event.inputs.custom_id }}"
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID="${{ github.run_id }}"
-          fi
-
-          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:$RUN_ID"
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-          echo "Identified image as: $IMAGE"
-
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: ./app
           push: true
-          tags: ${{ steps.set-image.outputs.image }}
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.event.inputs.custom_id || github.run_id }}
 
   deploy:
-    name: Provision
+    name: Provision Infrastructure
     needs: build
-    uses: ./.github/workflows/reusable-deploy.yml
-    with:
-      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
-      environment: "qa"
-      container_image: ${{ needs.build.outputs.container_image }}
-      terraform_version: "1.14.4"
-    secrets: inherit
+    runs-on: ubuntu-latest
+    outputs:
+      app_url: ${{ steps.terraform.outputs.app_url }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Apply
+        id: terraform
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="run_id=${{ github.event.inputs.custom_id || github.run_id }}" \
+            -var="environment=qa" \
+            -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.event.inputs.custom_id || github.run_id }}" \
+            -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            -var="acr_username=${{ secrets.ACR_USERNAME }}" \
+            -var="acr_password=${{ secrets.ACR_PASSWORD }}"
+          echo "app_url=$(terraform output -raw app_url)" >> $GITHUB_OUTPUT
+
+      - name: Upload TF State
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfstate-${{ github.event.inputs.custom_id || github.run_id }}
+          path: terraform/terraform.tfstate
+          retention-days: 1
 
   test:
-    name: Regression
-    needs: [build, deploy]
-    uses: ./.github/workflows/reusable-test.yml
-    with:
-      target_url: ${{ needs.deploy.outputs.app_url }}
-      python_version: "3.11"
-      execution_type: "CI/CD Pipeline"
-      image_tag: ${{ github.event.inputs.custom_id || github.run_id }}
-    secrets: inherit
+    name: Run E2E Tests
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd tests
+          pip install -r requirements.txt
+
+      - name: Behave Tests
+        run: |
+          cd tests
+          behave -f allure_behave.formatter:AllureFormatter -o allure-results --junit --junit-directory junit-results
+        env:
+          BASE_URL: ${{ needs.deploy.outputs.app_url }}
+          HEADLESS: true
+
+      - name: Upload Allure Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: tests/allure-results
 
   cleanup:
-    name: Destroy
-    needs: [build, deploy, test]
+    name: Destroy Infrastructure
+    needs: [deploy, test]
     if: always() && needs.deploy.result == 'success'
-    uses: ./.github/workflows/reusable-cleanup.yml
-    with:
-      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
-      environment: "qa"
-      container_image: ${{ needs.build.outputs.container_image }}
-      terraform_version: "1.14.4"
-    secrets: inherit
+    runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Download TF State
+        uses: actions/download-artifact@v4
+        with:
+          name: tfstate-${{ github.event.inputs.custom_id || github.run_id }}
+          path: terraform
+
+      - name: Terraform Destroy
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform destroy -auto-approve \
+            -var="run_id=${{ github.event.inputs.custom_id || github.run_id }}" \
+            -var="environment=qa" \
+            -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.event.inputs.custom_id || github.run_id }}" \
+            -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            -var="acr_username=${{ secrets.ACR_USERNAME }}" \
+            -var="acr_password=${{ secrets.ACR_PASSWORD }}"
+
+  report:
+    name: Publish Allure Report
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Results
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+
+      - name: Allure History
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Allure Report
+        uses: simple-elf/allure-report-action@master
+        with:
+          allure_results: allure-results
+          gh_pages: gh-pages
+          allure_report: allure-report
+          allure_history: allure-history
+          keep_histories: true
+
+      - name: Deploy to Gh-Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-report
+          publish_branch: gh-pages
