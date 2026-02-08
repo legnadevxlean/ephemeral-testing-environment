@@ -1,5 +1,5 @@
 # Target execution of automated tests against an existing environment
-name: MANUAL - Run Tests against url
+name: 03 - MANUAL - Run Tests against url
 
 on:
   workflow_dispatch:

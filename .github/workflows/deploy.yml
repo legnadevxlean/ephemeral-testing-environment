@@ -1,5 +1,5 @@
 # Manual environment deployment for testing purposes
-name: MANUAL - Deploy Environment
+name: "02 - MANUAL - Deploy Environment"
 
 on:
   workflow_dispatch:
@@ -19,7 +19,6 @@ on:
 
 env:
   TERRAFORM_VERSION: "1.14.4"
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
   build:
@@ -34,13 +33,21 @@ jobs:
       - name: Docker Login
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.ACR_LOGIN_SERVER }}
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
       - id: set-image
-        name: Set Image Name
-        run: echo "image=${{ env.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ inputs.custom_id || github.run_id }}" >> $GITHUB_OUTPUT
+        name: Generate Image Name
+        shell: bash
+        run: |
+          RUN_ID="${{ github.event.inputs.custom_id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID="${{ github.run_id }}"
+          fi
+
+          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:$RUN_ID"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
 
       - name: Build and Push
         uses: docker/build-push-action@v5
@@ -54,7 +61,7 @@ jobs:
     needs: build
     uses: ./.github/workflows/reusable-deploy.yml
     with:
-      run_id: ${{ inputs.custom_id || github.run_id }}
+      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
       environment: "qa-manual"
       container_image: ${{ needs.build.outputs.container_image }}
       terraform_version: "1.14.4"
@@ -76,7 +83,7 @@ jobs:
     if: always() && inputs.auto_destroy == true && needs.deploy.result == 'success'
     uses: ./.github/workflows/reusable-cleanup.yml
     with:
-      run_id: ${{ inputs.custom_id || github.run_id }}
+      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
       environment: "qa-manual"
       container_image: ${{ needs.build.outputs.container_image }}
       terraform_version: "1.14.4"
