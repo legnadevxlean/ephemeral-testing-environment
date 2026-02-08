@@ -37,6 +37,8 @@ allure-report/
 # Test artifacts
 failure_*.png
 *.log
+*.output
+*.ps1
 
 # Terraform
 .terraform/
