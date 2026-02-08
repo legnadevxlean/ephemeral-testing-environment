@@ -1,5 +1,10 @@
 # Target execution of automated tests against an existing environment
-name: 03 - MANUAL - Run Tests against url
+name: MANUAL - Run Tests against url
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 on:
   workflow_dispatch:
@@ -8,21 +13,108 @@ on:
         description: "Target URL to test (e.g., http://qa-app-123.westeurope.azurecontainer.io)"
         required: true
         type: string
-      custom_tag:
-        description: "Custom label/ID for the report (optional)"
-        required: false
-        type: string
 
 env:
   PYTHON_VERSION: "3.11"
 
 jobs:
   test:
-    name: Run Tests
-    uses: ./.github/workflows/reusable-test.yml
-    with:
-      target_url: ${{ inputs.target_url }}
-      python_version: "3.11"
-      execution_type: "Manual Regression"
-      image_tag: ${{ inputs.custom_tag || 'N/A' }}
-    secrets: inherit
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Target URL
+        run: |
+          echo "Validating availability of: ${{ inputs.target_url }}"
+          if ! curl -s -o /dev/null -w "%{http_code}" "${{ inputs.target_url }}" | grep -q "200"; then
+            echo "Warning: Target service is not responding with HTTP 200"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          cd tests
+          pip install -r requirements.txt
+
+      - name: Execute Behave Scenarios
+        run: |
+          cd tests
+          behave -f allure_behave.formatter:AllureFormatter -o allure-results --junit --junit-directory junit-results --no-capture
+        env:
+          BASE_URL: ${{ inputs.target_url }}
+          HEADLESS: true
+
+      - name: Publish Test Summary
+        uses: test-summary/action@v2
+        with:
+          paths: "tests/junit-results/*.xml"
+        if: always()
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results
+          path: tests/allure-results
+          retention-days: 30
+
+  report:
+    name: Publish Allure Report
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Allure results
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+
+      - name: Get Allure history
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Allure Report Action
+        uses: simple-elf/allure-report-action@master
+        with:
+          allure_results: allure-results
+          gh_pages: gh-pages
+          allure_report: allure-report
+          allure_history: allure-history
+          keep_histories: true
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-report
+          publish_branch: gh-pages
+
+      - name: Output Report URL
+        if: always()
+        run: |
+          REPORT_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          echo "### 🚀 Manual Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target URL** | [${{ inputs.target_url }}](${{ inputs.target_url }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Allure Report** | [📊 View Detailed Report]($REPORT_URL) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered By** | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 *Note: The Allure Report covers all recent executions. Check the history for this specific run.*" >> $GITHUB_STEP_SUMMARY

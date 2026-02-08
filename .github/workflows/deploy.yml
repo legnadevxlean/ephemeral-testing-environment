@@ -1,21 +1,22 @@
 # Manual environment deployment for testing purposes
-name: "02 - MANUAL - Deploy Environment"
+name: MANUAL - Deploy Environment
 
 on:
   workflow_dispatch:
     inputs:
-      custom_id:
-        description: "Custom Identifier (optional, defaults to Run ID)"
-        required: false
-        type: string
-      keep_alive:
-        description: "How many minutes to keep the environment alive before destroying?"
-        default: "30"
+      environment:
+        description: "Environment to deploy"
         required: true
-      auto_destroy:
-        description: "Automatically destroy resources after timeout?"
-        type: boolean
-        default: true
+        type: choice
+        options:
+          - dev
+          - qa
+        default: "qa"
+      keep_alive_minutes:
+        description: "Minutes to keep environment alive (0 = indefinite, cancel manually)"
+        required: true
+        type: number
+        default: 30
 
 env:
   TERRAFORM_VERSION: "1.14.4"
@@ -25,66 +26,165 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     outputs:
-      container_image: ${{ steps.set-image.outputs.image }}
+      image_tag: ${{ github.run_id }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Docker Login
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Azure Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_LOGIN_SERVER }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - id: set-image
-        name: Generate Image Name
-        shell: bash
-        run: |
-          RUN_ID="${{ github.event.inputs.custom_id }}"
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID="${{ github.run_id }}"
-          fi
-
-          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:$RUN_ID"
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-
-      - name: Build and Push
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: ./app
           push: true
-          tags: ${{ steps.set-image.outputs.image }}
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.run_id }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy:
-    name: Provision
-    needs: build
-    uses: ./.github/workflows/reusable-deploy.yml
-    with:
-      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
-      environment: "qa-manual"
-      container_image: ${{ needs.build.outputs.container_image }}
-      terraform_version: "1.14.4"
-    secrets: inherit
-
-  wait:
-    name: Wait Timer
-    needs: deploy
+    name: Deploy Infrastructure
     runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      app_url: ${{ steps.terraform.outputs.app_url }}
+      resource_group: ${{ steps.terraform.outputs.resource_group_name }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
     steps:
-      - name: Keep Alive Timer
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Provision Infrastructure
+        id: terraform
+        working-directory: ./terraform
         run: |
-          echo "Environment will be kept alive for ${{ inputs.keep_alive }} minutes."
-          sleep $(( ${{ inputs.keep_alive }} * 60 ))
+          terraform init
+          terraform validate
+          terraform apply -auto-approve \
+            -var="run_id=${{ github.run_id }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.run_id }}" \
+            -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            -var="acr_username=${{ secrets.ACR_USERNAME }}" \
+            -var="acr_password=${{ secrets.ACR_PASSWORD }}"
+          echo "app_url=$(terraform output -raw app_url)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+
+      - name: Persist Terraform State
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfstate-${{ github.run_id }}
+          path: terraform/terraform.tfstate
+          retention-days: 1
+
+      - name: Verify Service Availability
+        run: |
+          echo "Verifying application availability at ${{ steps.terraform.outputs.app_url }}..."
+          for i in {1..30}; do
+            if curl -s -o /dev/null -w "%{http_code}" "${{ steps.terraform.outputs.app_url }}" | grep -q "200"; then
+              echo "Application is responsive."
+              exit 0
+            fi
+            echo "Attempt $i/30: service not ready yet, retrying in 10s..."
+            sleep 10
+          done
+          echo "Error: Application failed to respond within the expected timeframe."
+          exit 1
+
+  keep-alive:
+    name: Wait for Testing
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          echo "## Manual Testing Environment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Successfully deployed" >> $GITHUB_STEP_SUMMARY
+          echo "**Endpoint:** ${{ needs.deploy.outputs.app_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.keep_alive_minutes }}" == "0" ]; then
+            echo "Persistence: Indefinite (manual cancellation required)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Persistence: Automatic destruction in ${{ inputs.keep_alive_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Maintain Environment
+        run: |
+          echo "------------------------------------------"
+          echo "ENVIRONMENT READY FOR TESTING"
+          echo "------------------------------------------"
+          echo "URL: ${{ needs.deploy.outputs.app_url }}"
+          echo ""
+          if [ "${{ inputs.keep_alive_minutes }}" == "0" ]; then
+            echo "Keeping environment active indefinitely. Cancel workflow to initiate cleanup."
+            sleep infinity
+          else
+            echo "Initiating automatic destruction in ${{ inputs.keep_alive_minutes }} minutes..."
+            sleep $(( ${{ inputs.keep_alive_minutes }} * 60 ))
+          fi
 
   cleanup:
-    name: Destroy
-    needs: [build, deploy, wait]
-    if: always() && inputs.auto_destroy == true && needs.deploy.result == 'success'
-    uses: ./.github/workflows/reusable-cleanup.yml
-    with:
-      run_id: ${{ github.event.inputs.custom_id || github.run_id }}
-      environment: "qa-manual"
-      container_image: ${{ needs.build.outputs.container_image }}
-      terraform_version: "1.14.4"
-    secrets: inherit
+    name: Cleanup Infrastructure
+    runs-on: ubuntu-latest
+    needs: [deploy, keep-alive]
+    if: always() && needs.deploy.result == 'success'
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Recover Terraform State
+        uses: actions/download-artifact@v4
+        with:
+          name: tfstate-${{ github.run_id }}
+          path: terraform
+
+      - name: Destroy Resources
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform destroy -auto-approve \
+            -var="run_id=${{ github.run_id }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.run_id }}" \
+            -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            -var="acr_username=${{ secrets.ACR_USERNAME }}" \
+            -var="acr_password=${{ secrets.ACR_PASSWORD }}"
+
+      - name: Summary
+        run: |
+          echo "## Infrastructure Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "All ephemeral resources associated with this run have been successfully removed." >> $GITHUB_STEP_SUMMARY
