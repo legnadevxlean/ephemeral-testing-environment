@@ -184,6 +184,21 @@ jobs:
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
             -var="acr_password=${{ secrets.ACR_PASSWORD }}"
 
+      - name: Verify Destruction
+        run: |
+          RG_NAME="rg-ephemeral-${{ inputs.environment }}-${{ github.run_id }}"
+          echo "Verifying destruction of Resource Group: $RG_NAME"
+
+          # Login to Azure to use CLI verification
+          az login --service-principal -u ${{ secrets.ARM_CLIENT_ID }} -p ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+
+          if az group exists --name "$RG_NAME" | grep -q "true"; then
+            echo "Error: Resource Group $RG_NAME still exists after destruction attempt."
+            exit 1
+          else
+            echo "Success: Resource Group $RG_NAME has been verified as deleted."
+          fi
+
       - name: Summary
         run: |
           echo "## Infrastructure Cleanup" >> $GITHUB_STEP_SUMMARY

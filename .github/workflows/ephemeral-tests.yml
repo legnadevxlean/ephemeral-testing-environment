@@ -112,6 +112,12 @@ jobs:
           BASE_URL: ${{ needs.deploy.outputs.app_url }}
           HEADLESS: true
 
+      - name: Publish Test Summary
+        uses: test-summary/action@v2
+        with:
+          paths: "tests/junit-results/*.xml"
+        if: always()
+
       - name: Upload Allure Results
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,9 +163,24 @@ jobs:
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
             -var="acr_password=${{ secrets.ACR_PASSWORD }}"
 
+      - name: Verify Destruction
+        run: |
+          RG_NAME="rg-ephemeral-qa-${{ github.event.inputs.custom_id || github.run_id }}"
+          echo "Verifying destruction of Resource Group: $RG_NAME"
+
+          # Login to Azure to use CLI verification
+          az login --service-principal -u ${{ secrets.ARM_CLIENT_ID }} -p ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+
+          if az group exists --name "$RG_NAME" | grep -q "true"; then
+            echo "Error: Resource Group $RG_NAME still exists after destruction attempt."
+            exit 1
+          else
+            echo "Success: Resource Group $RG_NAME has been verified as deleted."
+          fi
+
   report:
     name: Publish Allure Report
-    needs: test
+    needs: [deploy, test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -186,7 +207,7 @@ jobs:
           gh_pages: gh-pages
           allure_report: allure-report
           allure_history: allure-history
-          keep_histories: true
+          keep_reports: true
 
       - name: Deploy to Gh-Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -194,3 +215,18 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: allure-report
           publish_branch: gh-pages
+
+      - name: Output Summary
+        if: always()
+        run: |
+          REPORT_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          echo "### 🚀 QA Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target URL** | [${{ needs.deploy.outputs.app_url }}](${{ needs.deploy.outputs.app_url }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Allure Report** | [📊 View Detailed Report]($REPORT_URL) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Run ID** | \`${{ github.event.inputs.custom_id || github.run_id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 *Note: Infrastructure has been automatically deprovisioned after testing.*" >> $GITHUB_STEP_SUMMARY

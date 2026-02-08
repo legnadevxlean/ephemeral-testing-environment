@@ -96,7 +96,7 @@ jobs:
           gh_pages: gh-pages
           allure_report: allure-report
           allure_history: allure-history
-          keep_histories: true
+          keep_reports: true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
