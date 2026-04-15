@@ -16,12 +16,11 @@ provider "azurerm" {
   features {}
 
   # Disable auto-registration of Resource Providers.
-  # Required when the account lacks Microsoft.*/register/action permissions
-  # (common with Contributor role on corporate subscriptions).
+  # Required when the Service Principal lacks Microsoft.*/register/action permissions.
   # Ensure the providers you need are already registered in the subscription:
-  #   az provider show -n Microsoft.ContainerInstance -o table
-  #   az provider show -n Microsoft.Resources -o table
-  resource_provider_registrations = "none"
+  #   az provider register --namespace Microsoft.ContainerInstance
+  #   az provider register --namespace Microsoft.Resources
+  skip_provider_registration = true
 }
 
 locals {
