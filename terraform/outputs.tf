@@ -1,8 +1,8 @@
 # Outputs - Values exposed after terraform apply
 
 output "resource_group_name" {
-  description = "Name of the created resource group"
-  value       = azurerm_resource_group.qa.name
+  description = "Name of the resource group"
+  value       = data.azurerm_resource_group.qa.name
 }
 
 output "app_url" {

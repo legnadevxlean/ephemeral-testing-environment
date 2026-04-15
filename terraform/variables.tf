@@ -1,9 +1,9 @@
 # Variables for Ephemeral QA Environment
 
 variable "resource_group_name" {
-  description = "Base name for the resource group"
+  description = "Name of the existing resource group to deploy into"
   type        = string
-  default     = "rg-ephemeral-qa"
+  default     = "leanangel"
 }
 
 variable "location" {

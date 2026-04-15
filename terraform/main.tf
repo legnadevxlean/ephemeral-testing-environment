@@ -36,16 +36,15 @@ locals {
   }
 }
 
-resource "azurerm_resource_group" "qa" {
-  name     = "${var.resource_group_name}-${var.run_id}"
-  location = var.location
-  tags     = local.common_tags
+# Use existing resource group (sp-tests has Contributor scoped to this RG)
+data "azurerm_resource_group" "qa" {
+  name = var.resource_group_name
 }
 
 resource "azurerm_container_group" "app" {
   name                = "aci-${local.resource_name_prefix}"
-  location            = azurerm_resource_group.qa.location
-  resource_group_name = azurerm_resource_group.qa.name
+  location            = data.azurerm_resource_group.qa.location
+  resource_group_name = data.azurerm_resource_group.qa.name
   os_type             = "Linux"
   ip_address_type     = "Public"
   dns_name_label      = local.resource_name_prefix
