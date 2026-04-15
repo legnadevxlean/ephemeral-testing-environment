@@ -73,7 +73,7 @@ jobs:
           terraform apply -auto-approve \
             -var="run_id=${{ github.event.inputs.custom_id || github.run_id }}" \
             -var="environment=qa" \
-            -var="resource_group_name=rg-ephemeral-qa" \
+            -var="resource_group_name=leanangel" \
             -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.event.inputs.custom_id || github.run_id }}" \
             -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
@@ -159,7 +159,7 @@ jobs:
           terraform destroy -auto-approve \
             -var="run_id=${{ github.event.inputs.custom_id || github.run_id }}" \
             -var="environment=qa" \
-            -var="resource_group_name=rg-ephemeral-qa" \
+            -var="resource_group_name=leanangel" \
             -var="container_image=${{ secrets.ACR_LOGIN_SERVER }}/ephemeral-qa-app:${{ github.event.inputs.custom_id || github.run_id }}" \
             -var="acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             -var="acr_username=${{ secrets.ACR_USERNAME }}" \
@@ -167,7 +167,7 @@ jobs:
 
       - name: Verify Destruction
         run: |
-          RG_NAME="rg-ephemeral-qa-${{ github.event.inputs.custom_id || github.run_id }}"
+          RG_NAME="leanangel-${{ github.event.inputs.custom_id || github.run_id }}"
           echo "Verifying destruction of Resource Group: $RG_NAME"
 
           # Login to Azure to use CLI verification
