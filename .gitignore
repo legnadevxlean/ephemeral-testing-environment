@@ -53,3 +53,12 @@ override.tf.json
 .terraform.tfstate.lock.info
 .terraformrc
 terraform.rc
+
+
+.env
+*debug*
+AIHElpers
+.github
+.vscode
+package-lock.json
+docs/
