@@ -62,3 +62,4 @@ AIHElpers
 .vscode
 package-lock.json
 docs/
+.DS_Store
